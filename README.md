@@ -1,4 +1,3 @@
-````markdown
 # 🎮 Falling Blocks Catcher - Enhanced Edition
 
 A colorful 2D **arcade-style game** built with Python and [Pygame](https://www.pygame.org/).  
