@@ -2,7 +2,7 @@ import pygame
 import random
 import sys
 import math
-import os
+import os, numpy
 
 # Initialize pygame
 pygame.init()
@@ -59,7 +59,7 @@ active_power_ups = {key: 0 for key in POWERUP_TYPES.keys()}  # Track active powe
 # Block types with their properties
 BLOCK_TYPES = {
     "good": {"points": 10, "color": GREEN, "spawn_chance": 60},
-    "bad": {"points": -10, "color": RED, "spawn_chance": 25},
+    "bad": {"points": -10, "color": RED, "spawn_chance": 25, "damage": 10},
     "special": {"points": 20, "color": YELLOW, "spawn_chance": 10, "heal": 5},
     "bonus": {"points": 50, "color": ORANGE, "spawn_chance": 4, "heal": 10},
     "bomb": {"points": -30, "color": BLACK, "spawn_chance": 1, "damage": 20}
@@ -71,26 +71,35 @@ clock = pygame.time.Clock()
 font = pygame.font.SysFont(None, 36)
 small_font = pygame.font.SysFont(None, 24)
 
-# Create sound objects with buffer to fix playback issues
+# Sound initialization
+has_sound = False
+catch_sound = None
+damage_sound = None
+powerup_sound = None
+level_up_sound = None
+
+# Try to load sound files
 try:
-    # Create silent sound objects using numpy arrays
-    import numpy
-    silent_array = numpy.zeros((2205, 2), dtype=numpy.int16)  # 0.05s of silence at 44100Hz stereo
-    catch_sound = pygame.mixer.Sound(silent_array)
-    damage_sound = pygame.mixer.Sound(silent_array)
-    powerup_sound = pygame.mixer.Sound(silent_array)
-    level_up_sound = pygame.mixer.Sound(silent_array)
+    # Create silent sounds as fallback
+    silent_array = numpy.zeros((44100, 2), dtype=numpy.int16)  # 1 second of silence, stereo
+    catch_sound = pygame.sndarray.make_sound(silent_array)
+    damage_sound = pygame.sndarray.make_sound(silent_array)
+    powerup_sound = pygame.sndarray.make_sound(silent_array)
+    level_up_sound = pygame.sndarray.make_sound(silent_array)
     
     # Try to load actual sound files if they exist
-    if os.path.exists("catch.wav"):
-        catch_sound = pygame.mixer.Sound("catch.wav")
-    if os.path.exists("damage.wav"):
-        damage_sound = pygame.mixer.Sound("damage.wav")
-    if os.path.exists("powerup.wav"):
-        powerup_sound = pygame.mixer.Sound("powerup.wav")
-    if os.path.exists("levelup.wav"):
-        level_up_sound = pygame.mixer.Sound("levelup.wav")
+    sound_files = {
+        "catch.wav": catch_sound,
+        "damage.wav": damage_sound,
+        "powerup.wav": powerup_sound,
+        "level_up.wav": level_up_sound
+    }
     
+    for file_name, sound_obj in sound_files.items():
+        if os.path.exists(file_name):
+            sound_files[file_name] = pygame.mixer.Sound(file_name)
+    
+    catch_sound, damage_sound, powerup_sound, level_up_sound = sound_files.values()
     has_sound = True
 except Exception as e:
     print(f"Sound initialization error: {e}")
@@ -158,7 +167,7 @@ def draw_basket():
         screen.blit(shield_surface, (basket_x + basket_width/2 - shield_radius, 
                                     basket_y + basket_height/2 - shield_radius))
     
-    pygame.draw.rect(screen, color, (basket_x, basket_y, basket_width, basket_height))
+    pygame.draw.rect(screen, tuple(map(int, color)), (basket_x, basket_y, basket_width, basket_height))
     
     # Draw basket details
     pygame.draw.rect(screen, BLACK, (basket_x, basket_y, basket_width, basket_height), 2)
@@ -240,7 +249,8 @@ def draw_ui():
     health_width = 200
     health_height = 20
     pygame.draw.rect(screen, (50, 50, 50), (WIDTH - health_width - 10, 10, health_width, health_height))
-    pygame.draw.rect(screen, GREEN, (WIDTH - health_width - 10, 10, health_width * (health/100), health_height))
+    health_color = GREEN if health > 50 else YELLOW if health > 25 else RED
+    pygame.draw.rect(screen, health_color, (WIDTH - health_width - 10, 10, health_width * (health/100), health_height))
     pygame.draw.rect(screen, WHITE, (WIDTH - health_width - 10, 10, health_width, health_height), 2)
     
     health_text = small_font.render(f"{health}%", True, WHITE)
@@ -293,7 +303,7 @@ def spawn_power_up():
 # Apply a power-up effect
 def apply_power_up(power_type):
     active_power_ups[power_type] = POWERUP_TYPES[power_type]["duration"]
-    if has_sound:
+    if has_sound and powerup_sound is not None:
         try:
             powerup_sound.play()
         except:
@@ -332,7 +342,7 @@ def check_level_up():
             for _ in range(100):
                 create_particles(WIDTH//2, HEIGHT//2, level_colors[level-1])
             
-            if has_sound:
+            if has_sound and level_up_sound is not None:
                 try:
                     level_up_sound.play()
                 except:
@@ -450,13 +460,9 @@ while not game_over:
                 
                 score += points
                 
-                # FIXED: Health reduction for bad blocks
-                if block_type == "bad" or block_type == "bomb":
-                    if "damage" in props:
-                        health -= props["damage"]
-                    else:
-                        health -= 10  # Default damage for bad blocks
-                
+                # Handle health changes
+                if "damage" in props:
+                    health -= props["damage"]
                 if "heal" in props:
                     health = min(100, health + props["heal"])
                 
@@ -467,9 +473,11 @@ while not game_over:
                 if has_sound:
                     try:
                         if points > 0:
-                            catch_sound.play()
+                            if catch_sound is not None:
+                                catch_sound.play()
                         else:
-                            damage_sound.play()
+                            if damage_sound is not None:
+                                damage_sound.play()
                     except:
                         pass
             
